@@ -128,6 +128,9 @@
       <button class="btn full" id="notesExpCsv">全件をCSVで保存</button>
       <button class="btn ghost full" id="notesExpJson">全件をJSONで保存</button>
     </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn ghost full" id="sandExpCsv">砂記録をCSVで保存</button>
+    </div>
     <div class="divider"></div>
     <h3 class="small" style="margin-bottom:2px">項目で絞り込んで保存</h3>
     <p class="small muted" style="margin-top:0">種類・項目で絞り込んだ分だけ書き出せます。</p>
@@ -144,10 +147,11 @@
 
   <div class="card">
     <h3>インポート(一括追加)</h3>
-    <p class="small muted">CSV / JSON を読み込み。新規の項目・メモとして追加されます（<code class="k">id</code>列は不要。一致する場合のみ上書き更新）。「馬場カレンダー」アプリで書き出したファイルもそのまま読み込めます。</p>
+    <p class="small muted">CSV / JSON を読み込み。新規の項目・メモとして追加されます（<code class="k">id</code>列は不要。一致する場合のみ上書き更新）。CSVはヘッダーで自動判別し、メモCSVと砂記録CSV（<code class="k">origin</code>・<code class="k">percent</code>列を含むもの）のどちらも同じ入力欄から読み込めます。「馬場カレンダー」アプリで書き出したファイルもそのまま読み込めます。</p>
     <input type="file" id="notesImpFile" accept=".csv,.json,text/csv,application/json" style="margin-top:8px">
     <div class="row" style="margin-top:10px; gap:8px; flex-wrap:wrap">
       <button class="btn ghost" id="notesTemplate">CSVテンプレDL</button>
+      <button class="btn ghost" id="sandTemplate">砂CSVテンプレDL</button>
       <button class="btn ghost" id="notesAiPrompt">AIでCSV作成</button>
     </div>
     <p class="tiny muted" style="margin-top:8px">手入力が大変なら「AIでCSV作成」でプロンプトをコピーし、ChatGPTやClaudeに自分のメモと貼ると、取り込めるCSVを作ってくれます。</p>
@@ -566,6 +570,61 @@
     downloadFile(`baba_memo_${todayISO()}.csv`, notesToCSV(state.notes), "text/csv;charset=utf-8"); toast("CSVを書き出しました"); }
   function doNotesExportJSON(){ const d={app:"baba-memo",type:"notes",version:1,exportedAt:new Date().toISOString(),notes:state.notes,sand:state.sand};
     downloadFile(`baba_memo_${todayISO()}.json`, JSON.stringify(d,null,2),"application/json"); toast("JSONを書き出しました"); }
+  // クッション砂産地割合 CSV(縦持ち・1産地=1行。「馬場カレンダー」アプリと完全同一形式)
+  const SAND_CSV_COLS=["kind","subject","subjectEn","date","origin","percent"];
+  function sandToCSV(list){
+    const lines=[SAND_CSV_COLS.join(",")];
+    (list||[]).forEach(s=>{
+      (s.comp||[]).forEach(([o,p])=>{
+        lines.push(SAND_CSV_COLS.map(c=>{
+          if(c==="origin") return csvSafe(o);
+          if(c==="percent") return csvSafe(p);
+          return csvSafe(s[c]);
+        }).join(","));
+      });
+    });
+    return "﻿"+lines.join("\r\n");
+  }
+  // ヘッダーに origin・percent の両方があれば砂記録CSVとみなす(メモCSVとの自動判別用)
+  function isSandCSV(text){
+    const rows=parseCSV(text); if(!rows.length) return false;
+    const header=rows[0].map(h=>h.trim());
+    return header.includes("origin") && header.includes("percent");
+  }
+  // 同一(kind, subject/subjectEn, date)の複数行を1つの砂記録(comp配列)にまとめて取り込む
+  function csvToSand(text){
+    const rows=parseCSV(text); if(!rows.length) return [];
+    const header=rows[0].map(h=>h.trim()); const idx={}; SAND_CSV_COLS.forEach(c=>idx[c]=header.indexOf(c));
+    if(idx.origin<0 || idx.percent<0) throw new Error("CSVヘッダに origin,percent 列が必要です");
+    const groups={}, order=[];
+    for(let r=1;r<rows.length;r++){ const row=rows[r]; const g=c=> idx[c]>=0?stripCsvGuard(row[idx[c]]||""):"";
+      const kind=g("kind").trim()||"other";
+      const subject=g("subject").trim();
+      const subjectEn=g("subjectEn").trim();
+      const date=g("date").trim();
+      const origin=g("origin").trim();
+      const percent=Number(g("percent"))||0;
+      if(!subject && !subjectEn) continue;
+      if(!origin) continue;
+      const key=((subjectEn||subject).toLowerCase())+"|"+kind+"|"+date;
+      if(!(key in groups)){ groups[key]={kind,subject,subjectEn,date,comp:[]}; order.push(key); }
+      groups[key].comp.push([origin, percent]);
+    }
+    return order.map(k=>groups[k]).filter(g=>g.comp.length);
+  }
+  function doSandExportCSV(){
+    if(!state.sand.length){ toast("砂記録がありません"); return; }
+    downloadFile(`baba_memo_sand_${todayISO()}.csv`, sandToCSV(state.sand), "text/csv;charset=utf-8");
+    toast("砂記録CSVを書き出しました");
+  }
+  function doSandTemplate(){
+    const rows=[
+      ["venue","中山","","2026-06-01","青森","90"],
+      ["venue","中山","","2026-06-01","豪アルバニー","10"]
+    ];
+    const csv="﻿"+[SAND_CSV_COLS.join(","),...rows.map(r=>r.map(csvSafe).join(","))].join("\r\n");
+    downloadFile("baba_memo_sand_template.csv", csv, "text/csv;charset=utf-8");
+  }
   function handleNotesImport(file){
     readTextFile(file, (text)=>{ try{
       let incoming=[], incomingSand=[];
@@ -573,6 +632,7 @@
         const j=JSON.parse(text); incoming=Array.isArray(j)?j:(Array.isArray(j.notes)?j.notes:[]);
         incomingSand=(!Array.isArray(j) && Array.isArray(j.sand))?j.sand:[];
       }
+      else if(isSandCSV(text)) incomingSand=csvToSand(text);
       else incoming=csvToNotes(text);
       if(!incoming.length && !incomingSand.length){ toast("追加できるデータがありませんでした"); return; }
       let add=0,upd=0; incoming.forEach(raw=>{ const has=raw.id&&state.notes.some(n=>n.id===raw.id); upsertNote(raw); has?upd++:add++; });
@@ -746,6 +806,8 @@
     document.getElementById("noteSearch").oninput=renderNotes;
     document.getElementById("notesExpCsv").onclick=doNotesExportCSV;
     document.getElementById("notesExpJson").onclick=doNotesExportJSON;
+    document.getElementById("sandExpCsv").onclick=doSandExportCSV;
+    document.getElementById("sandTemplate").onclick=doSandTemplate;
     document.getElementById("notesExpKind").onchange=populateNotesExp;
     document.getElementById("notesExpSubject").onchange=refreshNotesExpCount;
     document.getElementById("notesExpRangeCsv").onclick=()=>doNotesExportRange("csv");

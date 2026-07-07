@@ -325,7 +325,7 @@
       const hlin=el("input",{type:"text",placeholder:"例: サンデーサイレンス；Sunday Silence",value:cur.lineage,oninput:e=>cur.lineage=e.target.value});
       horseWrap.appendChild(hlin);
       horseWrap.appendChild(el("label",{class:"fld",text:"見なし系統(任意・実系統より強く出ているとみられる系統または血統があれば記入できます)"}));
-      const hplin=el("input",{type:"text",placeholder:"例: ロベルト系",value:cur.presumedLineage,oninput:e=>cur.presumedLineage=e.target.value});
+      const hplin=el("input",{type:"text",placeholder:"",value:cur.presumedLineage,oninput:e=>cur.presumedLineage=e.target.value});
       horseWrap.appendChild(hplin);
       // 自由(タグなし)
       freeWrap.appendChild(el("label",{class:"fld",text:"項目名(海外・地方・自由)"}));

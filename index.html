@@ -23,6 +23,7 @@
   :root{
     --bg:#101211; --panel:#191c1a; --panel2:#212622; --line:#2d332e;
     --txt:#e9ebe6; --muted:#9ba69c; --accent:#d8b25e; --accent2:#8fce9f;
+    --turf:#2f9e5a; --dirt:#b6803a; --jump:#8a6bd6;
     --danger:#ff7369; --warn:#e6c069; --chip:#262b27;
     --safe-b: env(safe-area-inset-bottom, 0px);
   }
@@ -51,6 +52,15 @@
   .tagchip{font-size:11px; padding:2px 8px; border-radius:20px; background:var(--chip); color:var(--accent);}
   .memo-body{white-space:pre-wrap; word-break:break-word; margin-top:6px;}
   .cond{font-size:11px; padding:2px 7px; border-radius:6px; background:var(--chip); color:var(--muted);}
+  .cond.良{color:#8ef0a8;} .cond.稍重{color:#ffe08a;} .cond.重{color:#ffb86b;} .cond.不良{color:#ff8a8a;}
+  .surf-chip{font-size:11px; padding:2px 7px; border-radius:20px; font-weight:700; color:#0c0e12;}
+  .surf-chip.turf{background:var(--turf); color:#eafff0;}
+  .surf-chip.dirt{background:var(--dirt); color:#fff6e8;}
+  .surf-chip.jump{background:var(--jump); color:#f2ecff;}
+  .sandbar{display:flex; height:16px; border-radius:6px; overflow:hidden; border:1px solid var(--line); margin-top:4px;}
+  .sandseg{height:100%;}
+  .cmp{background:var(--panel2); border-radius:10px; padding:10px; margin-top:8px; border:1px dashed var(--line);}
+  .cmp .lbl{font-size:11px; color:var(--warn); font-weight:700; margin-bottom:6px;}
 
   /* Forms */
   label.fld{display:block; font-size:12px; color:var(--muted); margin:10px 0 4px;}
@@ -61,6 +71,9 @@
   .seg button{flex:1 1 auto; min-width:60px; background:var(--panel2); border:1px solid var(--line);
     border-radius:10px; padding:9px; font-weight:600;}
   .seg button.on{background:var(--accent); color:#241a05; border-color:var(--accent);}
+  .seg button.turf.on{background:var(--turf); color:#eafff0; border-color:var(--turf);}
+  .seg button.dirt.on{background:var(--dirt); color:#fff6e8; border-color:var(--dirt);}
+  .seg button.jump.on{background:var(--jump); color:#f2ecff; border-color:var(--jump);}
   .btn{display:inline-flex; align-items:center; justify-content:center; gap:6px;
     background:var(--accent); color:#241a05; font-weight:700; border-radius:10px; padding:11px 14px;}
   .btn.ghost{background:var(--panel2); color:var(--txt); border:1px solid var(--line);}
@@ -175,9 +188,15 @@
   // ---------- 定数 ----------
   const STORAGE_KEY = "babaMemo.v1";
   const VENUES = ["札幌","函館","福島","新潟","東京","中山","中京","京都","阪神","小倉"];
+  const SURFACES = ["芝","ダート","障害"];
+  const CONDITIONS = ["良","稍重","重","不良"];
+  const SURF_CLASS = {"芝":"turf","ダート":"dirt","障害":"jump"};
+  const DISTANCES = (()=>{ const a=[]; for(let d=1000; d<=3600; d+=100) a.push(d); return a; })();
+  const SAND_ORIGINS = ["青森","新潟","宮城","福島","愛知","宮崎","豪アルバニー","その他（自由入力）"];
+  const SAND_COLOR = {"青森":"#3a3a3a","新潟":"#565656","宮城":"#7d7d7d","福島":"#b89a6a","愛知":"#c7a15c","宮崎":"#d8c07c","豪アルバニー":"#f2f2f2"};
 
   // ---------- 状態 ----------
-  let state = { notes: [] };
+  let state = { notes: [], sand: [] };
 
   // ---------- ユーティリティ ----------
   function uid(){
@@ -225,6 +244,7 @@
       if(raw){ const j=JSON.parse(raw); if(j && Array.isArray(j.notes)) state=j; }
     }catch(e){ console.warn("load失敗",e); }
     if(!Array.isArray(state.notes)) state.notes=[];
+    if(!Array.isArray(state.sand)) state.sand=[];
   }
   function save(){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -244,9 +264,83 @@
       tags:Array.isArray(n.tags)?n.tags.filter(Boolean)
            :(typeof n.tags==="string"&&n.tags?n.tags.split(/[;；]/).map(s=>s.trim()).filter(Boolean):[]),
       memo:n.memo||"",
+      surface:SURFACES.includes(n.surface)?n.surface:"",       // 馬場(venue/otherのみ・任意)
+      condition:CONDITIONS.includes(n.condition)?n.condition:"", // 馬場状態(venue/otherのみ・任意)
+      distance:(n.distance!=null && String(n.distance).trim()!=="")?String(parseInt(n.distance,10)||""):"", // 距離(m・任意)
       createdAt:n.createdAt||new Date().toISOString(),
       updatedAt:n.updatedAt||new Date().toISOString()
     };
+  }
+  // ---------- クッション砂産地割合(ユーザー記録・ダート限定/venue・otherのみ) ----------
+  function normalizeSand(s){
+    return {
+      id:s.id||uid(),
+      kind:["venue","other"].includes(s.kind)?s.kind:"other",
+      subject:(s.subject||"").trim(),
+      subjectEn:(s.subjectEn||"").trim(),
+      date:(s.date||"").trim(),
+      comp:Array.isArray(s.comp)?s.comp.filter(c=>Array.isArray(c)&&c[0]!=null&&String(c[0]).trim()!=="")
+            .map(c=>[String(c[0]).trim(), Number(c[1])||0]):[],
+      createdAt:s.createdAt||new Date().toISOString(),
+      updatedAt:s.updatedAt||new Date().toISOString()
+    };
+  }
+  function sandKey(s){ return ((s.subjectEn||s.subject||"").trim().toLowerCase())+"|"+s.kind; }
+  function upsertSand(raw){
+    const s=normalizeSand(raw);
+    const key=sandKey(s);
+    const i=state.sand.findIndex(x=> sandKey(x)===key && x.date===s.date);
+    if(i>=0){ s.id=state.sand[i].id; s.createdAt=state.sand[i].createdAt; s.updatedAt=new Date().toISOString(); state.sand[i]=s; }
+    else state.sand.push(s);
+    save(); return s;
+  }
+  function removeSand(id){ state.sand=state.sand.filter(s=>s.id!==id); save(); }
+  function sandWhitePct(comp){ const w=(comp||[]).find(c=>c[0]==="豪アルバニー"); return w?w[1]:0; }
+  function sandBar(comp){
+    const bar=el("div",{class:"sandbar"});
+    (comp||[]).forEach(([o,p])=>{ const seg=el("div",{class:"sandseg"}); seg.style.width=p+"%";
+      seg.style.background=SAND_COLOR[o]||"#888"; if(o==="豪アルバニー") seg.style.boxShadow="inset 0 0 0 1px #999"; bar.appendChild(seg); });
+    return bar;
+  }
+  function sandLegend(comp){
+    const row=el("div",{class:"row",style:"flex-wrap:wrap; gap:8px; margin-top:6px"});
+    (comp||[]).forEach(([o,p])=>{ const s=el("span",{class:"tiny",style:"display:inline-flex;align-items:center;gap:4px"});
+      s.appendChild(el("span",{style:`display:inline-block;width:10px;height:10px;border-radius:2px;background:${SAND_COLOR[o]||"#888"};${o==="豪アルバニー"?"box-shadow:inset 0 0 0 1px #999;":""}`}));
+      s.appendChild(document.createTextNode(o+" "+p+"%")); row.appendChild(s); });
+    return row;
+  }
+  // 項目グループ内に表示する砂記録ブロック(最新バー＋推移トグル＋削除)
+  function sandGroupBox(key){
+    const list=state.sand.filter(s=>sandKey(s)===key).slice().sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    if(!list.length) return null;
+    const wrap=el("div",{class:"cmp"});
+    const latest=list[0];
+    const head0=el("div",{class:"row between"});
+    head0.appendChild(el("div",{class:"tiny muted",text:`クッション砂産地割合（${latest.date||"日付未設定"}・白砂${sandWhitePct(latest.comp)}%）`}));
+    head0.appendChild(el("button",{class:"tiny",style:"color:var(--danger);padding:2px 6px",text:"削除",onclick:()=>{
+      if(confirm("この産地割合の記録を削除しますか？")){ removeSand(latest.id); renderNotes(); toast("削除しました"); }
+    }}));
+    wrap.appendChild(head0);
+    wrap.appendChild(sandBar(latest.comp));
+    wrap.appendChild(sandLegend(latest.comp));
+    if(list.length>1){
+      const hbtn=el("button",{class:"tiny",style:"color:var(--accent);margin-top:8px",text:"産地割合の推移を見る ▾"});
+      const hbox=el("div",{style:"display:none;margin-top:6px"});
+      list.forEach(s=>{
+        const r=el("div",{style:"margin:6px 0; border-top:1px solid var(--line); padding-top:6px"});
+        const head=el("div",{class:"row between"});
+        head.appendChild(el("div",{class:"tiny muted",text:`${s.date||"日付未設定"}　白砂${sandWhitePct(s.comp)}%`}));
+        head.appendChild(el("button",{class:"tiny",style:"color:var(--danger);padding:2px 6px",text:"削除",onclick:()=>{
+          if(confirm("この産地割合の記録を削除しますか？")){ removeSand(s.id); renderNotes(); toast("削除しました"); }
+        }}));
+        r.appendChild(head);
+        r.appendChild(sandBar(s.comp)); r.appendChild(sandLegend(s.comp));
+        hbox.appendChild(r);
+      });
+      hbtn.onclick=()=>{ const op=hbox.style.display==="none"; hbox.style.display=op?"":"none"; hbtn.textContent=op?"産地割合の推移を隠す ▴":"産地割合の推移を見る ▾"; };
+      wrap.appendChild(hbtn); wrap.appendChild(hbox);
+    }
+    return wrap;
   }
   function upsertNote(n){
     n=normalizeNote(n);
@@ -267,19 +361,22 @@
     const wrap=document.getElementById("notesList"); wrap.innerHTML="";
     const q=(document.getElementById("noteSearch").value||"").trim().toLowerCase();
     let notes=state.notes;
-    if(q) notes=notes.filter(n=>(n.subject+" "+n.subjectEn+" "+(n.lineage||"")+" "+(n.presumedLineage||"")+" "+n.memo+" "+(n.tags||[]).join(" ")).toLowerCase().includes(q));
+    if(q) notes=notes.filter(n=>(n.subject+" "+n.subjectEn+" "+(n.lineage||"")+" "+(n.presumedLineage||"")+" "+n.memo+" "+(n.tags||[]).join(" ")+" "+(n.surface||"")+" "+(n.condition||"")).toLowerCase().includes(q));
     if(!notes.length){ wrap.appendChild(el("div",{class:"empty-state",
       text: state.notes.length? "該当する項目・メモがありません":"まだメモがありません。右下の＋から項目を作ってメモを追加できます。"})); return; }
     const groups={};
-    notes.forEach(n=>{ const k=noteKey(n); (groups[k]||(groups[k]={disp:noteDisplay(n),kind:n.kind,items:[]})).items.push(n); });
+    notes.forEach(n=>{ const k=noteKey(n); (groups[k]||(groups[k]={key:k,disp:noteDisplay(n),kind:n.kind,items:[]})).items.push(n); });
     const ord={venue:0,horse:1,other:2};
     Object.values(groups).sort((a,b)=>(ord[a.kind]-ord[b.kind])||a.disp.localeCompare(b.disp,"ja")).forEach(g=>{
       const card=el("div",{class:"card"});
       const head=el("div",{class:"row between"});
-      head.appendChild(el("div",{class:"row"},[ el("span",{class:"cond",text:NOTE_KINDS[g.kind]}), el("span",{style:"font-weight:700",text:g.disp}) ]));
+      const hasSand=g.kind!=="horse" && state.sand.some(s=>sandKey(s)===g.key);
+      head.appendChild(el("div",{class:"row"},[ el("span",{class:"cond",text:NOTE_KINDS[g.kind]}), el("span",{style:"font-weight:700",text:g.disp}),
+        hasSand? el("span",{class:"tiny muted",text:"🏖砂記録あり"}) : null ]));
       head.appendChild(el("button",{class:"tiny",style:"color:var(--accent);padding:4px 8px",text:"＋メモ",
         onclick:()=>{ const s=g.items[0]; openNoteEditor({kind:s.kind,subject:s.subject,subjectEn:s.subjectEn,lineage:s.lineage,presumedLineage:s.presumedLineage}); }}));
       card.appendChild(head);
+      if(hasSand){ const sb=sandGroupBox(g.key); if(sb) card.appendChild(sb); }
       g.items.slice().sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||"")).forEach(n=> card.appendChild(noteCard(n)));
       wrap.appendChild(card);
     });
@@ -288,6 +385,13 @@
     const box=el("div",{style:"border-top:1px solid var(--line);margin-top:8px;padding-top:8px"});
     if(n.kind==="horse" && n.lineage) box.appendChild(el("div",{class:"tiny muted",text:"系統: "+n.lineage}));
     if(n.kind==="horse" && n.presumedLineage) box.appendChild(el("div",{class:"tiny muted",text:"見なし系統: "+n.presumedLineage}));
+    if(n.surface || n.condition || n.distance){
+      const mr=el("div",{class:"row",style:"margin-bottom:4px"});
+      if(n.surface) mr.appendChild(el("span",{class:"surf-chip "+(SURF_CLASS[n.surface]||""),text:n.surface}));
+      if(n.condition) mr.appendChild(el("span",{class:"cond "+n.condition,text:n.condition}));
+      if(n.distance) mr.appendChild(el("span",{class:"cond",text:n.distance+"m"}));
+      box.appendChild(mr);
+    }
     if(n.memo) box.appendChild(el("div",{class:"memo-body",text:n.memo}));
     if(n.tags&&n.tags.length){ const tr=el("div",{class:"row",style:"margin-top:6px"}); n.tags.forEach(t=>tr.appendChild(el("span",{class:"tagchip",text:"#"+t}))); box.appendChild(tr); }
     const foot=el("div",{class:"row between",style:"margin-top:6px"});
@@ -304,7 +408,11 @@
     seed=seed||{};
     const isEdit=!!seed.id;
     let cur={ id:seed.id||null, kind:seed.kind||"venue", subject:seed.subject||"", subjectEn:seed.subjectEn||"",
-      lineage:seed.lineage||"", presumedLineage:seed.presumedLineage||"", tags:seed.tags||[], memo:seed.memo||"" };
+      lineage:seed.lineage||"", presumedLineage:seed.presumedLineage||"", tags:seed.tags||[], memo:seed.memo||"",
+      surface:SURFACES.includes(seed.surface)?seed.surface:"",
+      condition:CONDITIONS.includes(seed.condition)?seed.condition:"",
+      distance:seed.distance?String(seed.distance):"",
+      sandDate:"", sandRows:[["",""]] };
     openSheet(isEdit?"メモを編集":"メモを追加",(body)=>{
       body.appendChild(el("label",{class:"fld",text:"① 種類"}));
       const kseg=el("div",{class:"seg"});
@@ -331,11 +439,75 @@
       freeWrap.appendChild(el("label",{class:"fld",text:"項目名(海外・地方・自由)"}));
       const fin=el("input",{type:"text",placeholder:"例: ロンシャン / 大井 / 凱旋門賞 など",value:cur.kind==="other"?cur.subject:"",oninput:e=>{if(cur.kind==="other")cur.subject=e.target.value;}});
       freeWrap.appendChild(fin);
+
+      // 馬場・馬場状態・距離(venue/otherのみ・すべて任意)
+      const extraWrap=el("div");
+      extraWrap.appendChild(el("label",{class:"fld",text:"馬場(任意)"}));
+      const sseg=el("div",{class:"seg"});
+      function paintSurf(){ [...sseg.children].forEach(b=>b.classList.toggle("on",b.dataset.s===cur.surface)); }
+      SURFACES.forEach(s=> sseg.appendChild(el("button",{class:SURF_CLASS[s],"data-s":s,text:s,onclick:()=>{
+        cur.surface=(cur.surface===s?"":s); paintSurf(); updateSandVisibility();
+      }})));
+      extraWrap.appendChild(sseg);
+      extraWrap.appendChild(el("label",{class:"fld",text:"馬場状態(任意)"}));
+      const cseg=el("div",{class:"seg"});
+      function paintCond(){ [...cseg.children].forEach(b=>b.classList.toggle("on",b.dataset.c===cur.condition)); }
+      CONDITIONS.forEach(c=> cseg.appendChild(el("button",{"data-c":c,text:c,onclick:()=>{
+        cur.condition=(cur.condition===c?"":c); paintCond();
+      }})));
+      extraWrap.appendChild(cseg);
+      extraWrap.appendChild(el("label",{class:"fld",text:"距離(任意)"}));
+      const distSel=el("select",{onchange:e=>cur.distance=e.target.value});
+      distSel.appendChild(el("option",{value:"",text:"未設定"}));
+      DISTANCES.forEach(d=> distSel.appendChild(el("option",{value:String(d),text:d+"m"})));
+      distSel.value=cur.distance||"";
+      extraWrap.appendChild(distSel);
+
+      // クッション砂産地割合(venue/other かつ 馬場=ダートのときのみ・任意)
+      const sandWrap=el("div",{class:"cmp"});
+      sandWrap.appendChild(el("div",{class:"lbl",text:"クッション砂産地割合（任意）"}));
+      sandWrap.appendChild(el("label",{class:"fld",text:"施工年月日"}));
+      const sandDateIn=el("input",{type:"date",oninput:e=>cur.sandDate=e.target.value});
+      sandWrap.appendChild(sandDateIn);
+      const rowsBox=el("div",{style:"margin-top:8px"});
+      sandWrap.appendChild(rowsBox);
+      function renderSandRows(){
+        rowsBox.innerHTML="";
+        cur.sandRows.forEach((pair,i)=>{
+          const r=el("div",{class:"row",style:"margin-bottom:6px"});
+          const osel=el("select",{style:"flex:2",onchange:e=>{ cur.sandRows[i][0]=e.target.value; renderSandRows(); }});
+          osel.appendChild(el("option",{value:"",text:"産地を選択"}));
+          SAND_ORIGINS.forEach(o=> osel.appendChild(el("option",{value:o,text:o})));
+          osel.value=pair[0]||"";
+          const pin=el("input",{type:"number",min:"0",max:"100",placeholder:"割合%",style:"flex:1",value:pair[1]||"",
+            oninput:e=>{ cur.sandRows[i][1]=e.target.value; }});
+          const rm=el("button",{class:"tiny",style:"color:var(--danger);padding:4px 8px",text:"×",onclick:()=>{
+            cur.sandRows.splice(i,1); if(!cur.sandRows.length) cur.sandRows.push(["",""]); renderSandRows();
+          }});
+          r.appendChild(osel); r.appendChild(pin); r.appendChild(rm);
+          rowsBox.appendChild(r);
+          if(pair[0]==="その他（自由入力）"){
+            const custom=el("input",{type:"text",placeholder:"産地名を入力",style:"margin-top:-2px;margin-bottom:6px",value:pair[2]||"",
+              oninput:e=>{ cur.sandRows[i][2]=e.target.value; }});
+            rowsBox.appendChild(custom);
+          }
+        });
+      }
+      renderSandRows();
+      sandWrap.appendChild(el("button",{class:"btn ghost full",text:"＋行を追加",onclick:()=>{ cur.sandRows.push(["",""]); renderSandRows(); }}));
+      sandWrap.appendChild(el("div",{class:"tiny muted",style:"margin-top:8px",text:"合計が100%にならなくても保存できます。"}));
+
+      function updateSandVisibility(){
+        sandWrap.style.display=(cur.kind!=="horse" && cur.surface==="ダート")?"":"none";
+      }
+
       function paintKind(){
         [...kseg.children].forEach(b=>b.classList.toggle("on",b.dataset.k===cur.kind));
         venueWrap.style.display=cur.kind==="venue"?"":"none";
         horseWrap.style.display=cur.kind==="horse"?"":"none";
         freeWrap.style.display=cur.kind==="other"?"":"none";
+        extraWrap.style.display=cur.kind!=="horse"?"":"none";
+        updateSandVisibility();
       }
       [["venue","JRA開催場"],["horse","馬名"],["other","自由(海外/地方等)"]].forEach(([k,label])=>
         kseg.appendChild(el("button",{"data-k":k,text:label,onclick:()=>{ cur.kind=k; paintKind(); }})));
@@ -343,6 +515,9 @@
       body.appendChild(venueWrap); body.appendChild(horseWrap); body.appendChild(freeWrap);
       if(cur.kind==="venue") paintVenue();
       paintKind();
+      paintSurf(); paintCond();
+      body.appendChild(extraWrap);
+      body.appendChild(sandWrap);
       body.appendChild(el("label",{class:"fld",text:"② メモ"}));
       const ta=el("textarea",{placeholder:"自由に記入(開催日に関係なく残せます)",oninput:e=>cur.memo=e.target.value}); ta.value=cur.memo; body.appendChild(ta);
       const brow=el("div",{class:"btn-row"});
@@ -354,14 +529,23 @@
         upsertNote({id:cur.id,kind:cur.kind,subject:subj,subjectEn:subEn,
           lineage: cur.kind==="horse"?cur.lineage.trim():"",
           presumedLineage: cur.kind==="horse"?cur.presumedLineage.trim():"",
-          tags:cur.tags, memo:cur.memo});
+          tags:cur.tags, memo:cur.memo,
+          surface: cur.kind!=="horse"?cur.surface:"",
+          condition: cur.kind!=="horse"?cur.condition:"",
+          distance: cur.kind!=="horse"?cur.distance:""});
+        // クッション砂産地割合(任意・入力があれば別配列に保存)
+        if(cur.kind!=="horse" && cur.surface==="ダート" && cur.sandDate){
+          const comp=cur.sandRows.filter(p=>p[0] && String(p[1]).trim()!=="")
+            .map(p=> p[0]==="その他（自由入力）" ? [(p[2]||"").trim()||"その他", p[1]] : [p[0], p[1]]);
+          if(comp.length) upsertSand({kind:cur.kind, subject:subj, subjectEn:subEn, date:cur.sandDate, comp});
+        }
         closeSheet(); renderNotes(); toast(isEdit?"更新しました":"保存しました");
       }}));
       body.appendChild(brow);
     });
   }
   // メモ CSV/JSON (「馬場カレンダー」アプリの一般メモと完全互換の列定義)
-  const NOTE_COLS=["id","kind","subject","subjectEn","lineage","presumedLineage","tags","memo","createdAt","updatedAt"];
+  const NOTE_COLS=["id","kind","subject","subjectEn","lineage","presumedLineage","tags","memo","createdAt","updatedAt","surface","condition","distance"];
   function notesToCSV(notes){
     return buildCSV(NOTE_COLS, notes);
   }
@@ -372,34 +556,43 @@
     const out=[];
     for(let r=1;r<rows.length;r++){ const row=rows[r]; const g=c=> idx[c]>=0?stripCsvGuard(row[idx[c]]||""):"";
       const o={ id:g("id"), kind:g("kind").trim()||"other", subject:g("subject").trim(), subjectEn:g("subjectEn").trim(),
-        lineage:g("lineage"), presumedLineage:g("presumedLineage"), tags:g("tags"), memo:g("memo"), createdAt:g("createdAt")||undefined, updatedAt:g("updatedAt")||undefined };
+        lineage:g("lineage"), presumedLineage:g("presumedLineage"), tags:g("tags"), memo:g("memo"), createdAt:g("createdAt")||undefined, updatedAt:g("updatedAt")||undefined,
+        surface:g("surface").trim(), condition:g("condition").trim(), distance:g("distance").trim() };
       if(!o.subject && !o.memo) continue; out.push(o);
     }
     return out;
   }
   function doNotesExportCSV(){ if(!state.notes.length){toast("データがありません");return;}
     downloadFile(`baba_memo_${todayISO()}.csv`, notesToCSV(state.notes), "text/csv;charset=utf-8"); toast("CSVを書き出しました"); }
-  function doNotesExportJSON(){ const d={app:"baba-memo",type:"notes",version:1,exportedAt:new Date().toISOString(),notes:state.notes};
+  function doNotesExportJSON(){ const d={app:"baba-memo",type:"notes",version:1,exportedAt:new Date().toISOString(),notes:state.notes,sand:state.sand};
     downloadFile(`baba_memo_${todayISO()}.json`, JSON.stringify(d,null,2),"application/json"); toast("JSONを書き出しました"); }
   function handleNotesImport(file){
     readTextFile(file, (text)=>{ try{
-      let incoming=[];
-      if(/\.json$/i.test(file.name)||text.trim().startsWith("{")||text.trim().startsWith("[")){ const j=JSON.parse(text); incoming=Array.isArray(j)?j:(Array.isArray(j.notes)?j.notes:[]); }
+      let incoming=[], incomingSand=[];
+      if(/\.json$/i.test(file.name)||text.trim().startsWith("{")||text.trim().startsWith("[")){
+        const j=JSON.parse(text); incoming=Array.isArray(j)?j:(Array.isArray(j.notes)?j.notes:[]);
+        incomingSand=(!Array.isArray(j) && Array.isArray(j.sand))?j.sand:[];
+      }
       else incoming=csvToNotes(text);
-      if(!incoming.length){ toast("追加できるデータがありませんでした"); return; }
+      if(!incoming.length && !incomingSand.length){ toast("追加できるデータがありませんでした"); return; }
       let add=0,upd=0; incoming.forEach(raw=>{ const has=raw.id&&state.notes.some(n=>n.id===raw.id); upsertNote(raw); has?upd++:add++; });
-      renderNotes(); toast(`取込完了: 新規${add}件 / 更新${upd}件`);
+      let sa=0,su=0; incomingSand.forEach(raw=>{
+        const key=sandKey(normalizeSand(raw)); const has=state.sand.some(s=>sandKey(s)===key && s.date===(raw.date||"").trim());
+        upsertSand(raw); has?su++:sa++;
+      });
+      renderNotes();
+      toast(sa+su>0 ? `取込完了: メモ 新規${add}/更新${upd} ・砂記録 新規${sa}/更新${su}` : `取込完了: 新規${add}件 / 更新${upd}件`);
     }catch(err){ console.error(err); toast("読み込み失敗: "+err.message); } });
   }
 
   // メモ: 簡易テンプレ / AIプロンプト / 項目別エクスポート
   function doNotesTemplate(){
-    const header=["kind","subject","subjectEn","lineage","presumedLineage","memo"];
+    const header=["kind","subject","subjectEn","lineage","presumedLineage","memo","surface","condition","distance"];
     const rows=[
-      ["horse","レイデオロ","Rey de Oro","キングマンボ；Kingmambo","","長距離向き、末脚確か。"],
-      ["horse","ウインブライト","Win Bright","","ステイゴールド系","福島・中山が得意。"],
-      ["venue","中山","","","","小回りで先行有利の傾向。"],
-      ["other","ロンシャン","","","","重い馬場、日本馬は距離適性が重要。"]
+      ["horse","レイデオロ","Rey de Oro","キングマンボ；Kingmambo","","長距離向き、末脚確か。","","",""],
+      ["horse","ウインブライト","Win Bright","","ステイゴールド系","福島・中山が得意。","","",""],
+      ["venue","中山","","","","小回りで先行有利の傾向。","芝","良","1600"],
+      ["other","ロンシャン","","","","重い馬場、日本馬は距離適性が重要。","芝","重","2400"]
     ];
     const csv="﻿"+[header.join(","),...rows.map(r=>r.map(csvSafe).join(","))].join("\r\n");
     downloadFile("baba_memo_template.csv", csv, "text/csv;charset=utf-8");
@@ -409,7 +602,7 @@
 "あなたは競馬メモの整理アシスタントです。私のメモを「馬場メモ」アプリ用CSVに変換してください。",
 "",
 "【出力形式】",
-"- 1行目は必ずこのヘッダー: kind,subject,subjectEn,lineage,presumedLineage,memo",
+"- 1行目は必ずこのヘッダー: kind,subject,subjectEn,lineage,presumedLineage,memo,surface,condition,distance",
 "- 2行目以降にデータ。出力はCSVテキストのみ。前後の説明やコードブロック記号(```)は付けない。",
 "",
 "【各列のルール】",
@@ -419,6 +612,9 @@
 "- lineage: 系統（kindがhorseのときのみ・任意）。英名は；の後に併記可（例 ロベルト；Roberto）",
 "- presumedLineage: 見なし系統（kindがhorseのときのみ・任意）。公式の血統が不明でも自分で仮に割り当てる系統名（例 ロベルト系）",
 "- memo: メモ本文（自由記述）",
+"- surface: 馬場（kindがvenueまたはotherのときのみ・任意）。芝 / ダート / 障害 のいずれか。分からなければ空欄",
+"- condition: 馬場状態（kindがvenueまたはotherのときのみ・任意）。良 / 稍重 / 重 / 不良 のいずれか。分からなければ空欄",
+"- distance: 距離（kindがvenueまたはotherのときのみ・任意）。1000〜3600の100刻みの数値(m単位、単位は付けない)。分からなければ空欄",
 "",
 "【CSVの注意】",
 "- 値にカンマ , か改行か \" を含む場合は、値全体をダブルクオート \" で囲み、中の \" は \"\" に二重化する。",
@@ -455,8 +651,12 @@
     const p=[]; if(kSel.value) p.push(NOTE_KINDS[kSel.value]); if(sSel.value) p.push(sSel.selectedOptions[0].text);
     const base="baba_memo_"+(p.length?p.join("_"):"range");
     if(kind==="csv") downloadFile(base+".csv", notesToCSV(list), "text/csv;charset=utf-8");
-    else downloadFile(base+".json", JSON.stringify({app:"baba-memo",type:"notes",version:1,exportedAt:new Date().toISOString(),
-      filter:{kind:kSel.value,subject:sSel.value},notes:list},null,2), "application/json");
+    else{
+      const keys=new Set(list.map(noteKey));
+      const sandList=state.sand.filter(s=>keys.has(sandKey(s)));
+      downloadFile(base+".json", JSON.stringify({app:"baba-memo",type:"notes",version:1,exportedAt:new Date().toISOString(),
+        filter:{kind:kSel.value,subject:sSel.value},notes:list,sand:sandList},null,2), "application/json");
+    }
     toast(`${list.length}件を書き出しました`);
   }
 
@@ -532,7 +732,9 @@
   }
 
   function updateStat(){
-    document.getElementById("statCount").textContent=`${state.notes.length}件`;
+    document.getElementById("statCount").textContent= state.sand.length
+      ? `${state.notes.length}件（砂記録${state.sand.length}件）`
+      : `${state.notes.length}件`;
   }
 
   // ---------- 初期化 ----------
@@ -552,8 +754,8 @@
     document.getElementById("notesAiPrompt").onclick=showNotesAIPrompt;
     document.getElementById("notesImpFile").onchange=(e)=>{ const f=e.target.files[0]; if(f) handleNotesImport(f); e.target.value=""; };
     document.getElementById("wipe").onclick=()=>{
-      if(confirm("全ての一般メモを削除します。よろしいですか？（事前にエクスポート推奨）")){
-        state={notes:[]}; save(); renderNotes(); toast("全データを削除しました");
+      if(confirm("全ての一般メモ・砂記録を削除します。よろしいですか？（事前にエクスポート推奨）")){
+        state={notes:[],sand:[]}; save(); renderNotes(); toast("全データを削除しました");
       }
     };
   }

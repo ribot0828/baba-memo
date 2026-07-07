@@ -1,0 +1,19 @@
+{
+  "name": "馬場メモ",
+  "short_name": "馬場メモ",
+  "description": "開催日に依存しない項目別（開催場・馬名・自由）の競馬メモを残すアプリ",
+  "lang": "ja",
+  "dir": "auto",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101211",
+  "theme_color": "#101211",
+  "categories": ["sports", "productivity"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

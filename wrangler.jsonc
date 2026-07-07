@@ -1,0 +1,9 @@
+{
+  // Cloudflare Workers 静的アセット配信の設定
+  // リポジトリ全体を静的サイトとしてそのまま配信する（ビルド不要）
+  "name": "baba-memo",
+  "compatibility_date": "2026-07-03",
+  "assets": {
+    "directory": "./"
+  }
+}

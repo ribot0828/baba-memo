@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- セキュリティ: 外部通信を全面禁止(connect-src 'none')。データは端末内に留まり外部送信されない。
+     外部リソース読み込みも禁止し、サプライチェーン汚染・トラッキングを防ぐ。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; connect-src 'none'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none';">
+<meta name="referrer" content="no-referrer">
+<!-- クリックジャッキング対策: CSPのframe-ancestorsは<meta>経由だと仕様上無効なため、JSでフレーム化を検知して離脱する -->
+<script>try{if(window.top!==window.self){window.top.location=window.self.location;}}catch(e){document.addEventListener("DOMContentLoaded",function(){document.body.style.display="none";});}</script>
+<!-- スマホ「ホーム画面に追加」対応(アプリ風表示・iOSの保存データ消去対策の一助) -->
+<meta name="theme-color" content="#101211">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="馬場メモ">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>馬場メモ</title>
+<style>
+  :root{
+    --bg:#101211; --panel:#191c1a; --panel2:#212622; --line:#2d332e;
+    --txt:#e9ebe6; --muted:#9ba69c; --accent:#d8b25e; --accent2:#8fce9f;
+    --danger:#ff7369; --warn:#e6c069; --chip:#262b27;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0; background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Noto Sans JP",Meiryo,sans-serif;
+    font-size:15px; line-height:1.5;}
+  body{max-width:720px; margin:0 auto; padding-bottom:calc(24px + var(--safe-b));}
+  h1,h2,h3{margin:0 0 8px;}
+  button{font:inherit; color:inherit; cursor:pointer; border:none; background:none;}
+  .app-header{position:sticky; top:0; z-index:20; background:var(--bg);
+    padding:calc(10px + env(safe-area-inset-top,0px)) 14px 8px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:10px;}
+  .app-header .title{font-size:17px; font-weight:700; display:flex; align-items:center; gap:8px;}
+  .app-header .title .logo{width:20px; height:20px; flex:none;}
+  .app-header .sub{font-size:12px; color:var(--muted);}
+  .view{padding:12px 14px;}
+  .hidden{display:none !important;}
+
+  /* Cards / lists */
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:12px; margin-bottom:10px;}
+  .row{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .between{justify-content:space-between;}
+  .muted{color:var(--muted);} .small{font-size:12px;} .tiny{font-size:11px;}
+  .tagchip{font-size:11px; padding:2px 8px; border-radius:20px; background:var(--chip); color:var(--accent);}
+  .memo-body{white-space:pre-wrap; word-break:break-word; margin-top:6px;}
+  .cond{font-size:11px; padding:2px 7px; border-radius:6px; background:var(--chip); color:var(--muted);}
+
+  /* Forms */
+  label.fld{display:block; font-size:12px; color:var(--muted); margin:10px 0 4px;}
+  select,input[type=text],input[type=date],textarea{width:100%; background:var(--panel2);
+    color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:10px; font:inherit;}
+  textarea{min-height:110px; resize:vertical;}
+  .seg{display:flex; gap:6px; flex-wrap:wrap;}
+  .seg button{flex:1 1 auto; min-width:60px; background:var(--panel2); border:1px solid var(--line);
+    border-radius:10px; padding:9px; font-weight:600;}
+  .seg button.on{background:var(--accent); color:#241a05; border-color:var(--accent);}
+  .btn{display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    background:var(--accent); color:#241a05; font-weight:700; border-radius:10px; padding:11px 14px;}
+  .btn.ghost{background:var(--panel2); color:var(--txt); border:1px solid var(--line);}
+  .btn.danger{background:transparent; color:var(--danger); border:1px solid var(--danger);}
+  .btn.full{width:100%;}
+  .btn-row{display:flex; gap:8px; margin-top:14px;}
+
+  .fab{position:fixed; right:16px; bottom:calc(16px + var(--safe-b)); z-index:25;
+    width:56px; height:56px; border-radius:50%; background:var(--accent); color:#241a05;
+    font-size:30px; font-weight:400; box-shadow:0 6px 18px rgba(0,0,0,.4);
+    display:flex; align-items:center; justify-content:center; max-width:720px;}
+
+  /* Modal / sheet */
+  .sheet-backdrop{position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:40; display:flex;
+    align-items:flex-end; justify-content:center;}
+  .sheet{background:var(--panel); width:100%; max-width:720px; max-height:92vh; overflow:auto;
+    border-radius:16px 16px 0 0; padding:16px 16px calc(20px + var(--safe-b)); border-top:1px solid var(--line);}
+  .sheet::before{content:""; display:block; width:36px; height:4px; border-radius:2px; background:var(--line); margin:0 auto 10px;}
+  .sheet h2{display:flex; justify-content:space-between; align-items:center;}
+  .x{font-size:22px; color:var(--muted); padding:2px 8px;}
+
+  .empty-state{text-align:center; color:var(--muted); padding:40px 20px;}
+  .divider{height:1px; background:var(--line); margin:12px 0;}
+  .toast{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(20px + var(--safe-b));
+    background:#000; color:#fff; padding:9px 16px; border-radius:20px; font-size:13px; z-index:60; opacity:0;
+    transition:opacity .2s; pointer-events:none; border:1px solid var(--line);}
+  .toast.show{opacity:1;}
+  .filterow{display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;}
+  .filterow select{width:auto; flex:1; min-width:120px;}
+  code.k{background:var(--panel2); padding:1px 5px; border-radius:5px; font-size:12px;}
+</style>
+</head>
+<body>
+<div class="app-header">
+  <div style="flex:1">
+    <div class="title"><svg class="logo" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round"><path d="M17.8 4.2a1.9 1.9 0 0 1 2.7 2.7L13 14.4l-3.5.6.6-3.5 7.7-7.3z"/><path d="M12 5H6.5A2.5 2.5 0 0 0 4 7.5v10A2.5 2.5 0 0 0 6.5 20h10a2.5 2.5 0 0 0 2.5-2.5V12"/></svg>馬場メモ</div>
+    <div class="sub">開催日に関係なく残せる項目別メモ（非公式・個人制作／JRA非公認）</div>
+  </div>
+</div>
+
+<!-- メモ(項目別・開催日に依存しない) -->
+<section id="view-notes" class="view">
+  <h2 class="row between" style="justify-content:space-between">メモ <span class="muted small" id="notesStat"></span></h2>
+  <p class="small muted" style="margin-top:0">項目（開催場・馬名・自由）ごとにメモを残せます。馬名には系統・見なし系統も記録できます。</p>
+  <input type="text" id="noteSearch" placeholder="項目・英名・メモを検索（大小文字問わず）" style="margin-bottom:10px">
+  <div id="notesList"></div>
+
+  <div class="card">
+    <h3>エクスポート(保存)</h3>
+    <p class="small muted">メモをファイルに書き出します。CSVはExcel等で編集可能、JSONは完全バックアップ用。「馬場カレンダー」アプリとも同じ形式で相互に読み込めます。</p>
+    <div class="btn-row">
+      <button class="btn full" id="notesExpCsv">全件をCSVで保存</button>
+      <button class="btn ghost full" id="notesExpJson">全件をJSONで保存</button>
+    </div>
+    <div class="divider"></div>
+    <h3 class="small" style="margin-bottom:2px">項目で絞り込んで保存</h3>
+    <p class="small muted" style="margin-top:0">種類・項目で絞り込んだ分だけ書き出せます。</p>
+    <div class="filterow" style="margin-top:8px">
+      <select id="notesExpKind"><option value="">全種類</option><option value="venue">開催場</option><option value="horse">馬名</option><option value="other">自由</option></select>
+      <select id="notesExpSubject"><option value="">全項目</option></select>
+    </div>
+    <div class="small" id="notesExpCount" style="margin:2px 0 8px; color:var(--accent2)"></div>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn full" id="notesExpRangeCsv">範囲をCSV</button>
+      <button class="btn ghost full" id="notesExpRangeJson">範囲をJSON</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>インポート(一括追加)</h3>
+    <p class="small muted">CSV / JSON を読み込み。新規の項目・メモとして追加されます（<code class="k">id</code>列は不要。一致する場合のみ上書き更新）。「馬場カレンダー」アプリで書き出したファイルもそのまま読み込めます。</p>
+    <input type="file" id="notesImpFile" accept=".csv,.json,text/csv,application/json" style="margin-top:8px">
+    <div class="row" style="margin-top:10px; gap:8px; flex-wrap:wrap">
+      <button class="btn ghost" id="notesTemplate">CSVテンプレDL</button>
+      <button class="btn ghost" id="notesAiPrompt">AIでCSV作成</button>
+    </div>
+    <p class="tiny muted" style="margin-top:8px">手入力が大変なら「AIでCSV作成」でプロンプトをコピーし、ChatGPTやClaudeに自分のメモと貼ると、取り込めるCSVを作ってくれます。</p>
+  </div>
+
+  <div class="card">
+    <h3 class="between row" style="justify-content:space-between">現在のデータ <span class="muted small" id="statCount"></span></h3>
+    <p class="small muted">保存先: この端末のブラウザ内(localStorage)。外部送信は行いません。データ消失に備え、上の「全件をJSONで保存」を定期的なバックアップとしてお使いください。</p>
+    <button class="btn danger full" id="wipe" style="margin-top:8px">一般メモを全て削除</button>
+  </div>
+
+  <div class="card">
+    <h3>セキュリティ / 配布メモ</h3>
+    <ul class="small muted" style="margin:6px 0 0; padding-left:18px; line-height:1.7">
+      <li>単一HTML・サーバ不要。データは端末内のみ、外部送信なし(CSPで通信遮断)。</li>
+      <li>メモ表示はテキストとして描画(XSS対策)。CSV出力は数式インジェクション対策済み。</li>
+      <li>配布は静的ファイルとして共有可能(GitHub Pages等)。個人情報は保存しない設計を推奨。</li>
+    </ul>
+  </div>
+  <div class="card" style="border-color:var(--warn)">
+    <h3>免責事項・非公式について</h3>
+    <ul class="small muted" style="margin:6px 0 0; padding-left:18px; line-height:1.7">
+      <li>本アプリは<b>個人が趣味で制作した非公式ツール</b>です。JRA（日本中央競馬会）や関連団体とは一切関係なく、公認・提携もされていません。</li>
+      <li>競走馬名・レース名等の名称は各権利者に帰属します。本アプリは事実の記録・個人的な振り返りを目的としており、商用利用や広告掲載は行っていません。</li>
+      <li>内容について権利者から削除等のご要望があれば速やかに対応します。</li>
+    </ul>
+  </div>
+</section>
+
+<button class="fab" id="fab">＋</button>
+
+<div id="sheetRoot"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+  // ---------- 定数 ----------
+  const STORAGE_KEY = "babaMemo.v1";
+  const VENUES = ["札幌","函館","福島","新潟","東京","中山","中京","京都","阪神","小倉"];
+
+  // ---------- 状態 ----------
+  let state = { notes: [] };
+
+  // ---------- ユーティリティ ----------
+  function uid(){
+    if (crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "e-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,9);
+  }
+  function pad(n){ return String(n).padStart(2,"0"); }
+  function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+
+  // DOM生成ヘルパ(textContentで安全にテキスト挿入 = XSS対策)
+  function el(tag, props, children){
+    const n=document.createElement(tag);
+    if(props){ for(const k in props){
+      if(k==="class") n.className=props[k];
+      else if(k==="text") n.textContent=props[k];
+      else if(k==="html") { /* 未使用: 生HTMLは使わない */ }
+      else if(k.startsWith("on") && typeof props[k]==="function") n.addEventListener(k.slice(2), props[k]);
+      else if(props[k]!=null) n.setAttribute(k, props[k]);
+    }}
+    if(children!=null){
+      (Array.isArray(children)?children:[children]).forEach(c=>{
+        if(c==null) return;
+        n.appendChild(typeof c==="string"?document.createTextNode(c):c);
+      });
+    }
+    return n;
+  }
+  // ファイルをUTF-8テキストとして読み、onTextに渡す(失敗はtoast)
+  function readTextFile(file, onText){
+    const r=new FileReader();
+    r.onload=()=>onText(String(r.result));
+    r.onerror=()=>toast("ファイル読込エラー");
+    r.readAsText(file,"utf-8");
+  }
+  let toastTimer=null;
+  function toast(msg){
+    const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show");
+    clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"), 2200);
+  }
+
+  // ---------- 永続化 ----------
+  function load(){
+    try{
+      const raw=localStorage.getItem(STORAGE_KEY);
+      if(raw){ const j=JSON.parse(raw); if(j && Array.isArray(j.notes)) state=j; }
+    }catch(e){ console.warn("load失敗",e); }
+    if(!Array.isArray(state.notes)) state.notes=[];
+  }
+  function save(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch(e){ toast("保存に失敗しました"); console.error(e); }
+  }
+
+  // ---------- メモ(項目別・開催日に依存しない) ----------
+  const NOTE_KINDS={venue:"開催場",horse:"馬名",other:"自由"};
+  function normalizeNote(n){
+    return {
+      id:n.id||uid(),
+      kind:["venue","horse","other"].includes(n.kind)?n.kind:"other",
+      subject:(n.subject||"").trim(),
+      subjectEn:(n.subjectEn||"").trim(),
+      lineage:(n.lineage||"").trim(),            // 系統(馬名のみ・任意で英名併記可)
+      presumedLineage:(n.presumedLineage||"").trim(), // 見なし系統(馬名のみ・任意)
+      tags:Array.isArray(n.tags)?n.tags.filter(Boolean)
+           :(typeof n.tags==="string"&&n.tags?n.tags.split(/[;；]/).map(s=>s.trim()).filter(Boolean):[]),
+      memo:n.memo||"",
+      createdAt:n.createdAt||new Date().toISOString(),
+      updatedAt:n.updatedAt||new Date().toISOString()
+    };
+  }
+  function upsertNote(n){
+    n=normalizeNote(n);
+    const i=state.notes.findIndex(x=>x.id===n.id);
+    if(i>=0){ n.createdAt=state.notes[i].createdAt; n.updatedAt=new Date().toISOString(); state.notes[i]=n; }
+    else state.notes.push(n);
+    save(); return n;
+  }
+  function removeNote(id){ state.notes=state.notes.filter(n=>n.id!==id); save(); }
+  // 同一項目キー: 英名優先・大小文字無視で判別
+  function noteKey(n){ return ((n.subjectEn||n.subject||"").trim().toLowerCase())+"|"+n.kind; }
+  function noteDisplay(n){ return n.subject + (n.subjectEn? "（"+n.subjectEn+"）" : ""); }
+
+  function renderNotes(){
+    document.getElementById("notesStat").textContent=`${state.notes.length}件`;
+    updateStat();
+    populateNotesExp();
+    const wrap=document.getElementById("notesList"); wrap.innerHTML="";
+    const q=(document.getElementById("noteSearch").value||"").trim().toLowerCase();
+    let notes=state.notes;
+    if(q) notes=notes.filter(n=>(n.subject+" "+n.subjectEn+" "+(n.lineage||"")+" "+(n.presumedLineage||"")+" "+n.memo+" "+(n.tags||[]).join(" ")).toLowerCase().includes(q));
+    if(!notes.length){ wrap.appendChild(el("div",{class:"empty-state",
+      text: state.notes.length? "該当する項目・メモがありません":"まだメモがありません。右下の＋から項目を作ってメモを追加できます。"})); return; }
+    const groups={};
+    notes.forEach(n=>{ const k=noteKey(n); (groups[k]||(groups[k]={disp:noteDisplay(n),kind:n.kind,items:[]})).items.push(n); });
+    const ord={venue:0,horse:1,other:2};
+    Object.values(groups).sort((a,b)=>(ord[a.kind]-ord[b.kind])||a.disp.localeCompare(b.disp,"ja")).forEach(g=>{
+      const card=el("div",{class:"card"});
+      const head=el("div",{class:"row between"});
+      head.appendChild(el("div",{class:"row"},[ el("span",{class:"cond",text:NOTE_KINDS[g.kind]}), el("span",{style:"font-weight:700",text:g.disp}) ]));
+      head.appendChild(el("button",{class:"tiny",style:"color:var(--accent);padding:4px 8px",text:"＋メモ",
+        onclick:()=>{ const s=g.items[0]; openNoteEditor({kind:s.kind,subject:s.subject,subjectEn:s.subjectEn,lineage:s.lineage,presumedLineage:s.presumedLineage}); }}));
+      card.appendChild(head);
+      g.items.slice().sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||"")).forEach(n=> card.appendChild(noteCard(n)));
+      wrap.appendChild(card);
+    });
+  }
+  function noteCard(n){
+    const box=el("div",{style:"border-top:1px solid var(--line);margin-top:8px;padding-top:8px"});
+    if(n.kind==="horse" && n.lineage) box.appendChild(el("div",{class:"tiny muted",text:"系統: "+n.lineage}));
+    if(n.kind==="horse" && n.presumedLineage) box.appendChild(el("div",{class:"tiny muted",text:"見なし系統: "+n.presumedLineage}));
+    if(n.memo) box.appendChild(el("div",{class:"memo-body",text:n.memo}));
+    if(n.tags&&n.tags.length){ const tr=el("div",{class:"row",style:"margin-top:6px"}); n.tags.forEach(t=>tr.appendChild(el("span",{class:"tagchip",text:"#"+t}))); box.appendChild(tr); }
+    const foot=el("div",{class:"row between",style:"margin-top:6px"});
+    foot.appendChild(el("span",{class:"tiny muted",text:(n.updatedAt||"").slice(0,10)}));
+    foot.appendChild(el("div",{class:"row"},[
+      el("button",{class:"tiny muted",style:"padding:4px 8px",text:"編集",onclick:()=>openNoteEditor(n)}),
+      el("button",{class:"tiny",style:"padding:4px 8px;color:var(--danger)",text:"削除",onclick:()=>{
+        if(confirm("このメモを削除しますか？")){ removeNote(n.id); renderNotes(); toast("削除しました"); } }})
+    ]));
+    box.appendChild(foot);
+    return box;
+  }
+  function openNoteEditor(seed){
+    seed=seed||{};
+    const isEdit=!!seed.id;
+    let cur={ id:seed.id||null, kind:seed.kind||"venue", subject:seed.subject||"", subjectEn:seed.subjectEn||"",
+      lineage:seed.lineage||"", presumedLineage:seed.presumedLineage||"", tags:seed.tags||[], memo:seed.memo||"" };
+    openSheet(isEdit?"メモを編集":"メモを追加",(body)=>{
+      body.appendChild(el("label",{class:"fld",text:"① 種類"}));
+      const kseg=el("div",{class:"seg"});
+      const venueWrap=el("div"), horseWrap=el("div"), freeWrap=el("div");
+      // 開催場ボタン
+      const vseg=el("div",{class:"seg",style:"margin-top:8px"});
+      function paintVenue(){ [...vseg.children].forEach(b=>b.classList.toggle("on",b.dataset.v===cur.subject)); }
+      VENUES.forEach(v=> vseg.appendChild(el("button",{"data-v":v,text:v,onclick:()=>{ cur.subject=v; paintVenue(); }})));
+      venueWrap.appendChild(vseg);
+      // 馬名(系統・見なし系統つき、タグなし)
+      horseWrap.appendChild(el("label",{class:"fld",text:"馬名(日本語)"}));
+      const hjp=el("input",{type:"text",placeholder:"例: ディープインパクト",value:cur.kind==="horse"?cur.subject:"",oninput:e=>{if(cur.kind==="horse")cur.subject=e.target.value;}});
+      horseWrap.appendChild(hjp);
+      horseWrap.appendChild(el("label",{class:"fld",text:"馬の英名(任意・大小文字問わず判別)"}));
+      const hen=el("input",{type:"text",placeholder:"例: Deep Impact",value:cur.kind==="horse"?cur.subjectEn:"",oninput:e=>{if(cur.kind==="horse")cur.subjectEn=e.target.value;}});
+      horseWrap.appendChild(hen);
+      horseWrap.appendChild(el("label",{class:"fld",text:"系統(任意・英名は；の後に併記可)"}));
+      const hlin=el("input",{type:"text",placeholder:"例: サンデーサイレンス；Sunday Silence",value:cur.lineage,oninput:e=>cur.lineage=e.target.value});
+      horseWrap.appendChild(hlin);
+      horseWrap.appendChild(el("label",{class:"fld",text:"見なし系統(任意・実系統より強く出ているとみられる系統または血統があれば記入できます)"}));
+      const hplin=el("input",{type:"text",placeholder:"例: ロベルト系",value:cur.presumedLineage,oninput:e=>cur.presumedLineage=e.target.value});
+      horseWrap.appendChild(hplin);
+      // 自由(タグなし)
+      freeWrap.appendChild(el("label",{class:"fld",text:"項目名(海外・地方・自由)"}));
+      const fin=el("input",{type:"text",placeholder:"例: ロンシャン / 大井 / 凱旋門賞 など",value:cur.kind==="other"?cur.subject:"",oninput:e=>{if(cur.kind==="other")cur.subject=e.target.value;}});
+      freeWrap.appendChild(fin);
+      function paintKind(){
+        [...kseg.children].forEach(b=>b.classList.toggle("on",b.dataset.k===cur.kind));
+        venueWrap.style.display=cur.kind==="venue"?"":"none";
+        horseWrap.style.display=cur.kind==="horse"?"":"none";
+        freeWrap.style.display=cur.kind==="other"?"":"none";
+      }
+      [["venue","JRA開催場"],["horse","馬名"],["other","自由(海外/地方等)"]].forEach(([k,label])=>
+        kseg.appendChild(el("button",{"data-k":k,text:label,onclick:()=>{ cur.kind=k; paintKind(); }})));
+      body.appendChild(kseg);
+      body.appendChild(venueWrap); body.appendChild(horseWrap); body.appendChild(freeWrap);
+      if(cur.kind==="venue") paintVenue();
+      paintKind();
+      body.appendChild(el("label",{class:"fld",text:"② メモ"}));
+      const ta=el("textarea",{placeholder:"自由に記入(開催日に関係なく残せます)",oninput:e=>cur.memo=e.target.value}); ta.value=cur.memo; body.appendChild(ta);
+      const brow=el("div",{class:"btn-row"});
+      brow.appendChild(el("button",{class:"btn full",text:isEdit?"更新":"保存",onclick:()=>{
+        const subj = cur.kind==="venue"?cur.subject.trim() : (cur.kind==="horse"?hjp.value.trim() : fin.value.trim());
+        const subEn = cur.kind==="horse"?hen.value.trim():"";
+        if(!subj){ toast(cur.kind==="venue"?"開催場を選択してください":"項目名を入力してください"); return; }
+        if(!cur.memo.trim()){ toast("メモを入力してください"); return; }
+        upsertNote({id:cur.id,kind:cur.kind,subject:subj,subjectEn:subEn,
+          lineage: cur.kind==="horse"?cur.lineage.trim():"",
+          presumedLineage: cur.kind==="horse"?cur.presumedLineage.trim():"",
+          tags:cur.tags, memo:cur.memo});
+        closeSheet(); renderNotes(); toast(isEdit?"更新しました":"保存しました");
+      }}));
+      body.appendChild(brow);
+    });
+  }
+  // メモ CSV/JSON (「馬場カレンダー」アプリの一般メモと完全互換の列定義)
+  const NOTE_COLS=["id","kind","subject","subjectEn","lineage","presumedLineage","tags","memo","createdAt","updatedAt"];
+  function notesToCSV(notes){
+    return buildCSV(NOTE_COLS, notes);
+  }
+  function csvToNotes(text){
+    const rows=parseCSV(text); if(!rows.length) return [];
+    const header=rows[0].map(h=>h.trim()); const idx={}; NOTE_COLS.forEach(c=>idx[c]=header.indexOf(c));
+    if(idx.subject<0) throw new Error("CSVヘッダに subject 列が必要です");
+    const out=[];
+    for(let r=1;r<rows.length;r++){ const row=rows[r]; const g=c=> idx[c]>=0?stripCsvGuard(row[idx[c]]||""):"";
+      const o={ id:g("id"), kind:g("kind").trim()||"other", subject:g("subject").trim(), subjectEn:g("subjectEn").trim(),
+        lineage:g("lineage"), presumedLineage:g("presumedLineage"), tags:g("tags"), memo:g("memo"), createdAt:g("createdAt")||undefined, updatedAt:g("updatedAt")||undefined };
+      if(!o.subject && !o.memo) continue; out.push(o);
+    }
+    return out;
+  }
+  function doNotesExportCSV(){ if(!state.notes.length){toast("データがありません");return;}
+    downloadFile(`baba_memo_${todayISO()}.csv`, notesToCSV(state.notes), "text/csv;charset=utf-8"); toast("CSVを書き出しました"); }
+  function doNotesExportJSON(){ const d={app:"baba-memo",type:"notes",version:1,exportedAt:new Date().toISOString(),notes:state.notes};
+    downloadFile(`baba_memo_${todayISO()}.json`, JSON.stringify(d,null,2),"application/json"); toast("JSONを書き出しました"); }
+  function handleNotesImport(file){
+    readTextFile(file, (text)=>{ try{
+      let incoming=[];
+      if(/\.json$/i.test(file.name)||text.trim().startsWith("{")||text.trim().startsWith("[")){ const j=JSON.parse(text); incoming=Array.isArray(j)?j:(Array.isArray(j.notes)?j.notes:[]); }
+      else incoming=csvToNotes(text);
+      if(!incoming.length){ toast("追加できるデータがありませんでした"); return; }
+      let add=0,upd=0; incoming.forEach(raw=>{ const has=raw.id&&state.notes.some(n=>n.id===raw.id); upsertNote(raw); has?upd++:add++; });
+      renderNotes(); toast(`取込完了: 新規${add}件 / 更新${upd}件`);
+    }catch(err){ console.error(err); toast("読み込み失敗: "+err.message); } });
+  }
+
+  // メモ: 簡易テンプレ / AIプロンプト / 項目別エクスポート
+  function doNotesTemplate(){
+    const header=["kind","subject","subjectEn","lineage","presumedLineage","memo"];
+    const rows=[
+      ["horse","レイデオロ","Rey de Oro","キングマンボ；Kingmambo","","長距離向き、末脚確か。"],
+      ["horse","ウインブライト","Win Bright","","ステイゴールド系","福島・中山が得意。"],
+      ["venue","中山","","","","小回りで先行有利の傾向。"],
+      ["other","ロンシャン","","","","重い馬場、日本馬は距離適性が重要。"]
+    ];
+    const csv="﻿"+[header.join(","),...rows.map(r=>r.map(csvSafe).join(","))].join("\r\n");
+    downloadFile("baba_memo_template.csv", csv, "text/csv;charset=utf-8");
+  }
+  function notesAiPromptText(){
+    return [
+"あなたは競馬メモの整理アシスタントです。私のメモを「馬場メモ」アプリ用CSVに変換してください。",
+"",
+"【出力形式】",
+"- 1行目は必ずこのヘッダー: kind,subject,subjectEn,lineage,presumedLineage,memo",
+"- 2行目以降にデータ。出力はCSVテキストのみ。前後の説明やコードブロック記号(```)は付けない。",
+"",
+"【各列のルール】",
+"- kind: 種類。次のいずれか → venue（JRA開催場） / horse（馬名） / other（海外・地方・自由）",
+"- subject: 項目名。kindがvenueなら競馬場名（東京,中山,阪神,京都,中京,新潟,福島,小倉,札幌,函館）、horseなら馬の日本語名、otherなら自由な名称（例 ロンシャン, 大井, 凱旋門賞）",
+"- subjectEn: 馬の英名（あれば・kindがhorseのときのみ）。無ければ空欄。大文字小文字は問わない",
+"- lineage: 系統（kindがhorseのときのみ・任意）。英名は；の後に併記可（例 ロベルト；Roberto）",
+"- presumedLineage: 見なし系統（kindがhorseのときのみ・任意）。公式の血統が不明でも自分で仮に割り当てる系統名（例 ロベルト系）",
+"- memo: メモ本文（自由記述）",
+"",
+"【CSVの注意】",
+"- 値にカンマ , か改行か \" を含む場合は、値全体をダブルクオート \" で囲み、中の \" は \"\" に二重化する。",
+"- 値の先頭が = + - @ で始まる場合は、先頭に半角シングルクオート ' を付ける。",
+"- わからない項目は空欄でよい（推測で埋めない）。",
+"",
+"【私のメモ】",
+"↓ここに自分のメモを貼り付けてください↓",
+""
+    ].join("\n");
+  }
+  function showNotesAIPrompt(){
+    showPromptSheet("AIでメモCSVを作る",
+      "下のプロンプトをコピーしてChatGPTやClaude等に貼り付け、続けてあなたのメモを貼ると、そのまま取り込めるCSVを作ってくれます。",
+      notesAiPromptText());
+  }
+  function filteredNotes(){
+    const k=document.getElementById("notesExpKind").value, s=document.getElementById("notesExpSubject").value;
+    return state.notes.filter(n=> (!k||n.kind===k) && (!s||noteKey(n)===s));
+  }
+  function populateNotesExp(){
+    const kSel=document.getElementById("notesExpKind"), sSel=document.getElementById("notesExpSubject");
+    const k=kSel.value, groups={};
+    state.notes.forEach(n=>{ if(k&&n.kind!==k) return; const key=noteKey(n); if(!(key in groups)) groups[key]=noteDisplay(n); });
+    const keep=sSel.value; sSel.innerHTML=""; sSel.appendChild(el("option",{value:"",text:"全項目"}));
+    Object.entries(groups).sort((a,b)=>a[1].localeCompare(b[1],"ja")).forEach(([key,disp])=> sSel.appendChild(el("option",{value:key,text:disp})));
+    if([...sSel.options].some(o=>o.value===keep)) sSel.value=keep;
+    refreshNotesExpCount();
+  }
+  function refreshNotesExpCount(){ document.getElementById("notesExpCount").textContent=`該当 ${filteredNotes().length} 件`; }
+  function doNotesExportRange(kind){
+    const list=filteredNotes(); if(!list.length){ toast("該当データがありません"); return; }
+    const kSel=document.getElementById("notesExpKind"), sSel=document.getElementById("notesExpSubject");
+    const p=[]; if(kSel.value) p.push(NOTE_KINDS[kSel.value]); if(sSel.value) p.push(sSel.selectedOptions[0].text);
+    const base="baba_memo_"+(p.length?p.join("_"):"range");
+    if(kind==="csv") downloadFile(base+".csv", notesToCSV(list), "text/csv;charset=utf-8");
+    else downloadFile(base+".json", JSON.stringify({app:"baba-memo",type:"notes",version:1,exportedAt:new Date().toISOString(),
+      filter:{kind:kSel.value,subject:sSel.value},notes:list},null,2), "application/json");
+    toast(`${list.length}件を書き出しました`);
+  }
+
+  // ---------- CSV(共通基盤) ----------
+  // CSVインジェクション対策: 数式起動文字で始まるセルに ' を付与
+  function csvSafe(v){
+    let s = v==null ? "" : String(v);
+    if(/^[=+\-@\t\r]/.test(s)) s="'"+s;
+    if(/[",\r\n]/.test(s)) s='"'+s.replace(/"/g,'""')+'"';
+    return s;
+  }
+  function stripCsvGuard(v){ // インポート時: 付与した ' を戻す
+    if(typeof v==="string" && /^'[=+\-@\t\r]/.test(v)) return v.slice(1);
+    return v;
+  }
+  // 列定義から共通のCSV文字列を生成(tags列は;区切りで連結)
+  function buildCSV(cols, items){
+    const lines=[cols.join(",")];
+    items.forEach(it=> lines.push(cols.map(c=> c==="tags"?csvSafe((it.tags||[]).join(";")):csvSafe(it[c])).join(",")));
+    return "﻿"+lines.join("\r\n");
+  }
+  // RFC4180準拠パーサ
+  function parseCSV(text){
+    text=text.replace(/^﻿/,"");
+    const rows=[]; let row=[], field="", i=0, inQ=false;
+    while(i<text.length){
+      const c=text[i];
+      if(inQ){
+        if(c==='"'){ if(text[i+1]==='"'){ field+='"'; i+=2; continue; } inQ=false; i++; continue; }
+        field+=c; i++; continue;
+      }
+      if(c==='"'){ inQ=true; i++; continue; }
+      if(c===","){ row.push(field); field=""; i++; continue; }
+      if(c==="\r"){ i++; continue; }
+      if(c==="\n"){ row.push(field); rows.push(row); row=[]; field=""; i++; continue; }
+      field+=c; i++;
+    }
+    if(field!=="" || row.length){ row.push(field); rows.push(row); }
+    return rows.filter(r=>r.length && !(r.length===1 && r[0]===""));
+  }
+  function downloadFile(name, content, mime){
+    const blob=new Blob([content], {type:mime});
+    const url=URL.createObjectURL(blob);
+    const a=el("a",{href:url, download:name}); document.body.appendChild(a); a.click();
+    a.remove(); setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---------- シート(モーダル) ----------
+  function closeSheet(){ document.getElementById("sheetRoot").innerHTML=""; }
+  function openSheet(titleText, buildBody){
+    const root=document.getElementById("sheetRoot"); root.innerHTML="";
+    const backdrop=el("div",{class:"sheet-backdrop", onclick:(ev)=>{ if(ev.target===backdrop) closeSheet(); }});
+    const sheet=el("div",{class:"sheet"});
+    const head=el("h2",{}, [ el("span",{text:titleText}), el("button",{class:"x",text:"×",onclick:closeSheet}) ]);
+    sheet.appendChild(head);
+    buildBody(sheet);
+    backdrop.appendChild(sheet); root.appendChild(backdrop);
+  }
+
+  // プロンプト表示＋コピー用の共通シート
+  function showPromptSheet(title, desc, text){
+    openSheet(title,(body)=>{
+      body.appendChild(el("p",{class:"small muted",text:desc}));
+      const ta=el("textarea",{readonly:"readonly",style:"min-height:240px; font-size:12px"});
+      ta.value=text; body.appendChild(ta);
+      body.appendChild(el("button",{class:"btn full",style:"margin-top:10px",text:"プロンプトをコピー",onclick:async()=>{
+        let ok=false;
+        try{ await navigator.clipboard.writeText(ta.value); ok=true; }
+        catch(e){ try{ ta.focus(); ta.select(); ok=document.execCommand("copy"); }catch(_){ ok=false; } }
+        toast(ok?"コピーしました":"テキストを選択してコピーしてください");
+      }}));
+    });
+  }
+
+  function updateStat(){
+    document.getElementById("statCount").textContent=`${state.notes.length}件`;
+  }
+
+  // ---------- 初期化 ----------
+  function init(){
+    load();
+    renderNotes(); updateStat();
+
+    document.getElementById("fab").onclick=()=>openNoteEditor({});
+    document.getElementById("noteSearch").oninput=renderNotes;
+    document.getElementById("notesExpCsv").onclick=doNotesExportCSV;
+    document.getElementById("notesExpJson").onclick=doNotesExportJSON;
+    document.getElementById("notesExpKind").onchange=populateNotesExp;
+    document.getElementById("notesExpSubject").onchange=refreshNotesExpCount;
+    document.getElementById("notesExpRangeCsv").onclick=()=>doNotesExportRange("csv");
+    document.getElementById("notesExpRangeJson").onclick=()=>doNotesExportRange("json");
+    document.getElementById("notesTemplate").onclick=doNotesTemplate;
+    document.getElementById("notesAiPrompt").onclick=showNotesAIPrompt;
+    document.getElementById("notesImpFile").onchange=(e)=>{ const f=e.target.files[0]; if(f) handleNotesImport(f); e.target.value=""; };
+    document.getElementById("wipe").onclick=()=>{
+      if(confirm("全ての一般メモを削除します。よろしいですか？（事前にエクスポート推奨）")){
+        state={notes:[]}; save(); renderNotes(); toast("全データを削除しました");
+      }
+    };
+  }
+  document.addEventListener("DOMContentLoaded", init);
+  // PWA: Service Worker登録(オフライン対応・ホーム画面インストール)。file://や非対応環境では黙って無視。
+  if("serviceWorker" in navigator){
+    window.addEventListener("load", ()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); });
+  }
+})();
+</script>
+</body>
+</html>
